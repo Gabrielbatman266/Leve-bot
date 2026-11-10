@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Route
 
+import api
 import core
 import gateways as gw
 from core import esc, money
@@ -51,7 +52,7 @@ button.sec{background:#2a3040}button.red{background:#c92a2a}button.sm{padding:5p
 """
 
 NAV = [("/", "Início"), ("/vendas", "Vendas"), ("/membros", "Membros"), ("/planos", "Planos"),
-       ("/links", "Links"), ("/disparo", "Disparo"), ("/config", "Config"), ("/sair", "Sair")]
+       ("/links", "Links"), ("/disparo", "Disparo"), ("/postleve", "Post Leve"), ("/config", "Config"), ("/sair", "Sair")]
 
 
 # ───────────────────────── Helpers ─────────────────────────
@@ -159,7 +160,9 @@ def sources_table() -> str:
     for r in rows:
         n = leads.get(r["src"], 0)
         conv = f"{r['buyers'] * 100 / n:.1f}%" if n else "—"
-        trs += f"<tr><td>{esc(r['src'])}</td><td>{n}</td><td>{r['buyers']}</td><td>{conv}</td><td>{money('brl', r['brl'])}</td></tr>"
+        lbl = api.label_of(r["src"])
+        name = f"{esc(lbl)}<br><span class='muted'>{esc(r['src'])}</span>" if lbl else esc(r["src"])
+        trs += f"<tr><td>{name}</td><td>{n}</td><td>{r['buyers']}</td><td>{conv}</td><td>{money('brl', r['brl'])}</td></tr>"
     return f'<div class="tw"><table><tr><th>Origem</th><th>Leads</th><th>Compraram</th><th>Conversão</th><th>Faturou (R$)</th></tr>{trs}</table></div>'
 
 
@@ -516,6 +519,70 @@ Incluir botões dos planos</label>
     return page(request, "Disparo", body)
 
 
+# ───────────────────────── Post Leve ─────────────────────────
+@protected
+async def postleve(request: Request):
+    from urllib.parse import quote
+    if request.method == "POST":
+        await form_data(request)
+        api.new_api_key()
+        return back(request, "/postleve", "Chave nova gerada. Toque em Conectar de novo.")
+
+    key = api.api_key()
+    port = os.environ.get("PANEL_PORT", "8080")
+    base = gw.PUBLIC_URL or f"http://127.0.0.1:{port}"
+    bot_user = request.app.state.tg.bot.username
+    q = f"u={quote(base, safe='')}&k={quote(key, safe='')}&b={quote(bot_user, safe='')}"
+    intent_link = f"intent://vip?{q}#Intent;scheme=postleve;package=com.leve.analise;end"
+    plain_link = f"postleve://vip?{q}"
+
+    seen = int(get_setting("postleve_seen") or 0)
+    if seen and now() - seen < 3 * 3600:
+        status = f'<span class="pill ok">conectado</span> último contato {dt(seen)}'
+    elif seen:
+        status = f'<span class="pill pend">sem contato desde {dt(seen)}</span>'
+    else:
+        status = '<span class="pill exp">ainda não conectado</span>'
+
+    th = db.execute(
+        """SELECT COUNT(DISTINCT l.user_id) leads,
+             COUNT(DISTINCT CASE WHEN p.status='paid' THEN p.id END) vendas,
+             COALESCE(SUM(CASE WHEN p.status='paid' AND p.currency='brl' THEN p.amount END),0) valor
+           FROM leads l LEFT JOIN payments p ON p.user_id=l.user_id WHERE substr(l.source, 1, 3)='th_'"""
+    ).fetchone()
+    vip_posts = get_setting("postleve_vip_posts") or "0"
+
+    body = f"""
+<h2>Post Leve</h2>
+<p>{status}</p>
+<div class="grid">
+<div class="card"><small>Leads vindos do Threads</small><div class="v">{th['leads']}</div></div>
+<div class="card"><small>Vendas vindas do Threads</small><div class="v">{th['vendas']}</div><small>{money('brl', th['valor'])}</small></div>
+<div class="card"><small>Fotos postadas no VIP</small><div class="v">{esc(vip_posts)}</div></div>
+</div>
+<h2>Conectar</h2>
+<form class="box" onsubmit="return false">
+<p class="muted" style="margin:0">Abra esta página <b>no mesmo celular</b> do Post Leve e toque no botão. O Post Leve abre já conectado.</p>
+<a href="{esc(intent_link)}"><button type="button" style="width:100%">🔗 Conectar Post Leve</button></a>
+<p class="muted" style="margin:0">Não abriu? Tente <a href="{esc(plain_link)}">este link</a>, ou no Post Leve toque em
+<b>Colar conexão</b> depois de copiar:</p>
+<code id="cx">{esc(plain_link)}</code>
+<button type="button" class="sec" onclick="navigator.clipboard.writeText(document.getElementById('cx').innerText);this.innerText='Copiado ✓'">Copiar conexão</button>
+</form>
+<h2>O que eles trocam</h2>
+<div class="card">
+• O Post Leve coloca o seu link rastreado em posts de divulgação do VIP no Threads.<br>
+• O Leve VIP conta quem entrou e quem comprou por cada post e devolve para o Post Leve, que aprende
+quais fotos e legendas <b>vendem</b> e passa a usar mais elas.<br>
+• O Post Leve manda fotos para o grupo VIP sozinho, para os assinantes sempre terem conteúdo novo.
+</div>
+<h2>Segurança</h2>
+<form class="box" method="post" onsubmit="return confirm('Gerar chave nova? O Post Leve vai precisar conectar de novo.')">{csrf(request)}
+<p class="muted" style="margin:0">A chave dá acesso só a essas trocas (não mexe em pagamentos nem membros).</p>
+<button class="sec">🔄 Gerar chave nova</button></form>"""
+    return page(request, "Post Leve", body)
+
+
 # ───────────────────────── Config ─────────────────────────
 FIELDS = [
     ("Mensagens", [
@@ -621,6 +688,8 @@ def create_app(tg_application) -> Starlette:
             Route("/disparo", broadcast, methods=["GET", "POST"]),
             Route("/config", config, methods=["GET", "POST"]),
             Route("/webhook/syncpay", webhook_syncpay, methods=["POST"]),
+            Route("/postleve", postleve, methods=["GET", "POST"]),
+            *api.ROUTES,
         ],
         middleware=[Middleware(SessionMiddleware, secret_key=panel_secret(), session_cookie="levevip",
                                max_age=30 * 86400, same_site="strict",

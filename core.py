@@ -180,6 +180,9 @@ async def process_payment(bot, pay_id: int) -> str:
         lead = db.execute("SELECT username, first_name, source FROM leads WHERE user_id=?", (p["user_id"],)).fetchone()
         who = f"@{lead['username']}" if lead and lead["username"] else (lead["first_name"] if lead else p["user_id"])
         src = lead["source"] if lead and lead["source"] else "direto"
+        lbl = db.execute("SELECT label FROM source_labels WHERE source=?", (src,)).fetchone()
+        if lbl and lbl["label"]:
+            src = f"{lbl['label']} ({src})"
         tag = "" if p["kind"] == "normal" else f" ({p['kind']})"
         await safe_send(bot, admin_id(),
                         f"💰 Venda{tag}: {plan['name'] if plan else '?'} — {money(p['currency'], p['amount'])}\n"

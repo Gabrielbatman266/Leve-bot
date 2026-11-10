@@ -72,6 +72,12 @@ db.executescript(
         updated_at INTEGER
     );
 
+    -- Nome amigável das origens (ex.: o Post Leve diz que "th_k3x9" é um post do Threads)
+    CREATE TABLE IF NOT EXISTS source_labels (
+        source TEXT PRIMARY KEY,
+        label  TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
         key   TEXT PRIMARY KEY,
         value TEXT

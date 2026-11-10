@@ -57,6 +57,18 @@ lembrete antes de vencer · remoção automática · `/status` para o cliente.
 dar dias, remover, liberar manual) · planos · grupos detectados · **links rastreados**
 (`t.me/seubot?start=threads_bio`) com vendas por origem · **disparo em massa** · todos os textos e descontos.
 
+## Conectar com o Post Leve
+
+No painel, aba **Post Leve**, toque em **Conectar Post Leve** (no mesmo celular). Os dois passam a conversar:
+
+- O Post Leve solta no Threads, de vez em quando, uma divulgação do VIP com **link rastreado** (um código por post).
+- O Leve VIP conta quem entrou no bot e quem **comprou** por cada post e devolve para o Post Leve,
+  que passa a usar mais as fotos e legendas que **vendem**.
+- O Post Leve manda sozinho para o grupo VIP as fotos que você separar (algumas por dia).
+
+API (cabeçalho `X-Leve-Key`): `GET /api/v1/info`, `GET /api/v1/eventos?desde=<ms>`,
+`POST /api/v1/origens`, `POST /api/v1/vip/postar` (multipart `foto` + `legenda`).
+
 ## Rodar num servidor (24 h)
 
 O mesmo instalador funciona em Linux (Ubuntu/Debian):
@@ -78,5 +90,6 @@ nunca confia só no aviso.
 | `panel.py` | painel web |
 | `gateways.py` | SyncPay e Stripe |
 | `db.py` | banco SQLite e configurações |
+| `api.py` | API que o Post Leve usa |
 | `configurar.py` | assistente de configuração |
 | `install.sh`, `levebot`, `rodar.sh` | instalação e controle |
