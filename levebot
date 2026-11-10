@@ -9,7 +9,7 @@ PORT="$(grep -s '^PANEL_PORT=' .env | cut -d= -f2)"; PORT="${PORT:-8080}"
 running() { pgrep -f "$DIR/rodar.sh" >/dev/null 2>&1; }
 
 iniciar() {
-  if running; then echo -e "${G}● Já está rodando.${N}"; return; fi
+  if running; then echo -e "${G}● Já está rodando.${N}"; return 0; fi
   [ -f .env ] || { echo "Sem configuração. Rode: levebot configurar"; exit 1; }
   command -v termux-wake-lock >/dev/null && termux-wake-lock
   local start; start=$( { wc -c < bot.log; } 2>/dev/null || echo 0)
@@ -20,12 +20,13 @@ iniciar() {
     new="$(tail -c +$((start + 1)) bot.log 2>/dev/null)"
     if echo "$new" | grep -q "rodando. Painel"; then
       echo -e "\n${G}● Bot ligado:${N} $(echo "$new" | grep -o '@[A-Za-z0-9_]*' | head -1)  —  painel: http://localhost:$PORT"
-      return
+      return 0
     fi
     if ! running || echo "$new" | grep -q "Traceback\|levebot configurar"; then break; fi
   done
   echo -e "\n${R}✘ O bot não ligou. Últimas linhas do log:${N}"; tail -n 12 bot.log
   echo -e "Se for chave errada: ${B}levebot configurar${N}"
+  return 1
 }
 
 parar() {

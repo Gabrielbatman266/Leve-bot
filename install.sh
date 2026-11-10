@@ -61,7 +61,10 @@ if [ ! -f .env ]; then
   "$PY" configurar.py < /dev/tty
 fi
 
-"$DIR/levebot" reiniciar
+if ! "$DIR/levebot" reiniciar; then
+  echo -e "\n${Y}O Leve VIP foi instalado, mas não ligou.${N} Confira as chaves com: ${B}levebot configurar${N}\n"
+  exit 1
+fi
 
 echo -e "
 ${G}${B}✔ Leve VIP instalado e rodando!${N}
