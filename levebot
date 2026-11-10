@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Comando de controle do Leve VIP.
+DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+cd "$DIR" || exit 1
+PY="$(cat .python 2>/dev/null || echo python)"
+B="\033[1m"; G="\033[32m"; R="\033[31m"; N="\033[0m"
+PORT="$(grep -s '^PANEL_PORT=' .env | cut -d= -f2)"; PORT="${PORT:-8080}"
+
+running() { pgrep -f "$DIR/rodar.sh" >/dev/null 2>&1; }
+
+iniciar() {
+  if running; then echo -e "${G}● Já está rodando.${N}"; return; fi
+  [ -f .env ] || { echo "Sem configuração. Rode: levebot configurar"; exit 1; }
+  command -v termux-wake-lock >/dev/null && termux-wake-lock
+  local start; start=$( { wc -c < bot.log; } 2>/dev/null || echo 0)
+  nohup "$DIR/rodar.sh" >/dev/null 2>&1 &
+  echo -n "Ligando"
+  for _ in $(seq 1 30); do
+    sleep 1; echo -n "."
+    new="$(tail -c +$((start + 1)) bot.log 2>/dev/null)"
+    if echo "$new" | grep -q "rodando. Painel"; then
+      echo -e "\n${G}● Bot ligado:${N} $(echo "$new" | grep -o '@[A-Za-z0-9_]*' | head -1)  —  painel: http://localhost:$PORT"
+      return
+    fi
+    if ! running || echo "$new" | grep -q "Traceback\|levebot configurar"; then break; fi
+  done
+  echo -e "\n${R}✘ O bot não ligou. Últimas linhas do log:${N}"; tail -n 12 bot.log
+  echo -e "Se for chave errada: ${B}levebot configurar${N}"
+}
+
+parar() {
+  pkill -f "$DIR/rodar.sh" 2>/dev/null
+  pkill -f "$DIR/main.py" 2>/dev/null
+  sleep 1
+  echo -e "○ Bot desligado."
+}
+
+case "${1:-}" in
+  iniciar|ligar|start) iniciar ;;
+  parar|desligar|stop) parar ;;
+  reiniciar|restart) parar >/dev/null; iniciar ;;
+  status)
+    if running; then echo -e "${G}● Rodando${N} — painel: http://localhost:$PORT"; else echo -e "${R}○ Desligado${N} — use: levebot iniciar"; fi
+    echo; tail -n 8 bot.log 2>/dev/null ;;
+  log|logs) tail -n 50 -f bot.log ;;
+  painel)
+    echo "http://localhost:$PORT"
+    command -v termux-open-url >/dev/null && termux-open-url "http://localhost:$PORT" ;;
+  configurar|config) "$PY" configurar.py && { parar >/dev/null; iniciar; } ;;
+  atualizar|update)
+    git pull --ff-only && "$PY" -m pip install -q -r requirements.txt && { parar >/dev/null; iniciar; } ;;
+  *)
+    echo -e "${B}👑 Leve VIP${N}
+  levebot iniciar      liga o bot (em segundo plano)
+  levebot parar        desliga
+  levebot reiniciar    desliga e liga
+  levebot status       mostra se está rodando
+  levebot log          acompanha o log ao vivo (Ctrl+C sai)
+  levebot painel       abre o painel no navegador
+  levebot configurar   muda token, chaves, senha
+  levebot atualizar    baixa a versão nova do GitHub"
+    ;;
+esac
