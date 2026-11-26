@@ -53,7 +53,7 @@ button.sec{background:#2a3040}button.red{background:#c92a2a}button.sm{padding:5p
 """
 
 NAV = [("/", "Início"), ("/vendas", "Vendas"), ("/membros", "Membros"), ("/planos", "Planos"),
-       ("/links", "Links"), ("/disparo", "Disparo"), ("/postagem", "Postagem"), ("/postleve", "Post Leve"), ("/config", "Config"), ("/sair", "Sair")]
+       ("/links", "Links"), ("/copy", "Copy"), ("/disparo", "Disparo"), ("/postagem", "Postagem"), ("/postleve", "Post Leve"), ("/config", "Config"), ("/sair", "Sair")]
 
 
 # ───────────────────────── Helpers ─────────────────────────
@@ -586,28 +586,22 @@ quais fotos e legendas <b>vendem</b> e passa a usar mais elas.<br>
 
 # ───────────────────────── Config ─────────────────────────
 FIELDS = [
-    ("Mensagens", [
-        ("welcome_text", "Boas-vindas (/start)", "area"),
-        ("paid_text", "Pagamento confirmado", "area"),
-        ("expired_text", "Acesso vencido", "area"),
+    ("Vencimento", [
         ("remind_days", "Avisar quantos dias antes de vencer", "num"),
     ]),
     ("Remarketing (Pix gerado e não pago)", [
         ("remarketing_on", "Ativo", "bool"),
         ("remarketing_minutes", "Lembrar depois de (minutos)", "num"),
-        ("remarketing_text", "Mensagem de lembrete", "area"),
     ]),
     ("Downsell (desconto para quem não pagou)", [
         ("downsell_on", "Ativo", "bool"),
         ("downsell_minutes", "Oferecer depois de (minutos)", "num"),
         ("downsell_percent", "Desconto (%)", "num"),
-        ("downsell_text", "Mensagem", "area"),
     ]),
     ("Upsell (oferta logo depois da compra)", [
         ("upsell_on", "Ativo", "bool"),
         ("upsell_plan_id", "Plano oferecido", "plan"),
         ("upsell_percent", "Desconto (%)", "num"),
-        ("upsell_text", "Mensagem", "area"),
     ]),
 ]
 
@@ -648,6 +642,92 @@ async def config(request: Request):
                 html_parts.append(f'<label>{label}<select name="{key}">{plan_options(val, True)}</select></label>')
     html_parts.append("<button>Salvar</button></form>")
     return page(request, "Config", "".join(html_parts))
+
+
+# ───────────────────────── Copy (textos + fotos/vídeos do funil) ─────────────────────────
+async def store_upload(bot, up):
+    """Manda o arquivo para o dono (o Telegram só guarda o que foi enviado) e devolve (tipo, file_id, miniatura)."""
+    owner = admin_id()
+    if not owner:
+        raise RuntimeError("Defina o dono primeiro: mande /admin SUA_SENHA para o bot.")
+    data = await up.read()
+    if (up.content_type or "").startswith("video"):
+        m = await bot.send_video(owner, data, filename=up.filename, disable_notification=True)
+        res = ("video", m.video.file_id, m.video.thumbnail.file_id if m.video.thumbnail else "")
+    else:
+        m = await bot.send_photo(owner, data, disable_notification=True)
+        res = ("photo", m.photo[-1].file_id, m.photo[0].file_id)
+    try:
+        await m.delete()
+    except Exception:
+        pass
+    return res
+
+
+_copy_thumbs: dict[str, bytes] = {}
+
+
+@protected
+async def copy_page(request: Request):
+    parts = ['<h2>Copy do funil</h2><p class="muted">Texto e foto/vídeo de cada mensagem que o bot manda. '
+             'Com mídia, o texto vira a legenda (até 1024 letras; se passar, vai em mensagem separada). '
+             'Preços e planos ficam na aba <a href="/planos">Planos</a>; tempos e descontos em <a href="/config">Config</a>.</p>']
+    for key, label in core.MEDIA_KEYS.items():
+        m = core.get_media(key)
+        if m:
+            prev = (f'<img src="/copy/mini/{key}?v={esc(m[1][-8:])}" style="width:90px;height:90px;object-fit:cover;border-radius:10px">'
+                    if m[2] else "")
+            media_html = (f'<div style="display:flex;gap:10px;align-items:center">{prev}<span>{"🎬 vídeo" if m[0] == "video" else "🖼 foto"} anexado</span>'
+                          f'<label style="display:flex;gap:6px;align-items:center;margin-left:auto"><input type="checkbox" name="tirar" value="1" style="width:auto">tirar</label></div>')
+        else:
+            media_html = '<span class="muted">Sem foto/vídeo</span>'
+        text = get_setting(f"{key}_text")
+        parts.append(f"""<form class="box" method="post" action="/copy/salvar" enctype="multipart/form-data" style="margin-bottom:12px">{csrf(request)}
+<input type="hidden" name="key" value="{key}"><b>{esc(label)}</b>
+<label>Texto<textarea name="texto">{esc(text)}</textarea></label>
+{media_html}
+<label>Trocar foto/vídeo (opcional)<input type="file" name="arquivo" accept="image/*,video/*"></label>
+<button>Salvar</button></form>""")
+    return page(request, "Copy", "".join(parts))
+
+
+@protected
+async def copy_save(request: Request):
+    f = await form_data(request)
+    key = f.get("key", "")
+    if key not in core.MEDIA_KEYS:
+        return back(request, "/copy")
+    text = (f.get("texto") or "").strip()
+    set_setting(f"{key}_text", text or DEFAULTS.get(f"{key}_text", ""))
+    msg = "Salvo."
+    up = f.get("arquivo")
+    if f.get("tirar") == "1":
+        set_setting(f"{key}_media", "")
+    if up is not None and getattr(up, "filename", ""):
+        try:
+            kind, fid, thumb = await store_upload(request.app.state.tg.bot, up)
+            set_setting(f"{key}_media", f"{kind}|{fid}|{thumb}")
+            _copy_thumbs.pop(key, None)
+            msg = "Salvo com a nova mídia."
+        except Exception as e:
+            msg = f"Texto salvo, mas a mídia falhou: {e}"
+    return back(request, "/copy", msg)
+
+
+@protected
+async def copy_mini(request: Request):
+    key = request.path_params["key"]
+    m = core.get_media(key) if key in core.MEDIA_KEYS else None
+    if not m or not m[2]:
+        return Response(status_code=404)
+    cache_key = f"{key}:{m[2]}"
+    if cache_key not in _copy_thumbs:
+        try:
+            tf = await request.app.state.tg.bot.get_file(m[2])
+            _copy_thumbs[cache_key] = bytes(await tf.download_as_bytearray())
+        except Exception:
+            return Response(status_code=404)
+    return Response(_copy_thumbs[cache_key], media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 # ───────────────────────── Postagem automática ─────────────────────────
@@ -724,8 +804,7 @@ async def postagem(request: Request):
 @protected
 async def postagem_enviar(request: Request):
     f = await form_data(request)
-    owner = admin_id()
-    if not owner:
+    if not admin_id():
         return back(request, "/postagem", "Defina o dono primeiro: mande /admin SUA_SENHA para o bot.")
     bot = request.app.state.tg.bot
     caption = (f.get("legenda") or "").strip()
@@ -733,21 +812,10 @@ async def postagem_enviar(request: Request):
     for up in f.getlist("arquivos"):
         if not getattr(up, "filename", ""):
             continue
-        data = await up.read()
-        is_video = (up.content_type or "").startswith("video")
         try:
-            # o Telegram só guarda o arquivo se ele for enviado; mandamos para o dono e apagamos em seguida
-            if is_video:
-                m = await bot.send_video(owner, data, filename=up.filename, disable_notification=True)
-                autopost.add("video", m.video.file_id, caption, m.video.thumbnail.file_id if m.video.thumbnail else None)
-            else:
-                m = await bot.send_photo(owner, data, disable_notification=True)
-                autopost.add("photo", m.photo[-1].file_id, caption, m.photo[0].file_id)
+            kind, fid, thumb = await store_upload(bot, up)
+            autopost.add(kind, fid, caption, thumb or None)
             ok += 1
-            try:
-                await m.delete()
-            except Exception:
-                pass
         except Exception as e:  # arquivo grande demais, formato inválido…
             log.warning("upload falhou (%s): %s", up.filename, e)
             fail += 1
@@ -830,6 +898,9 @@ def create_app(tg_application) -> Starlette:
             Route("/config", config, methods=["GET", "POST"]),
             Route("/webhook/syncpay", webhook_syncpay, methods=["POST"]),
             Route("/postleve", postleve, methods=["GET", "POST"]),
+            Route("/copy", copy_page),
+            Route("/copy/salvar", copy_save, methods=["POST"]),
+            Route("/copy/mini/{key}", copy_mini),
             Route("/postagem", postagem, methods=["GET", "POST"]),
             Route("/postagem/enviar", postagem_enviar, methods=["POST"]),
             Route("/postagem/apagar", postagem_apagar, methods=["POST"]),
