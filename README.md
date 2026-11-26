@@ -57,6 +57,9 @@ lembrete antes de vencer · remoção automática · `/status` para o cliente.
 dar dias, remover, liberar manual) · planos · grupos detectados · **links rastreados**
 (`t.me/seubot?start=threads_bio`) com vendas por origem · **disparo em massa** · todos os textos e descontos.
 
+**Copy com foto/vídeo:** na aba **Copy** do painel você edita o texto e anexa uma foto ou vídeo em cada
+mensagem do funil (boas-vindas, lembrete do Pix, downsell, upsell, pagamento confirmado, acesso vencido).
+
 **Postagem automática:** fila de fotos e vídeos que o bot posta sozinho no grupo/canal no intervalo
 que você escolher. Alimente pela aba **Postagem** do painel (envio direto do celular) ou mandando
 foto/vídeo no privado do bot. Quando a fila acaba, ele reposta o que já saiu (nunca o mesmo duas vezes

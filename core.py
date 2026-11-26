@@ -61,17 +61,46 @@ def plan_price(plan, currency: str, kind: str) -> int | None:
     return max(100 if currency == "brl" else 50, round(base * (100 - pct) / 100))  # mínimo R$ 1 / 0,50
 
 
-async def safe_send(bot, user_id: int, text: str, **kw) -> bool:
-    """Envia mensagem sem derrubar nada se a pessoa bloqueou o bot."""
+# Mensagens do funil que podem ter foto ou vídeo (escolhidos na aba Copy do painel)
+MEDIA_KEYS = {
+    "welcome": "Boas-vindas (/start)",
+    "remarketing": "Lembrete do Pix não pago",
+    "downsell": "Downsell (desconto)",
+    "upsell": "Upsell (depois da compra)",
+    "paid": "Pagamento confirmado",
+    "expired": "Acesso vencido",
+}
+
+
+def get_media(key: str | None):
+    """(tipo, file_id, miniatura) da mídia de uma mensagem, ou None."""
+    if not key:
+        return None
+    parts = (get_setting(f"{key}_media") or "").split("|")
+    return (parts[0], parts[1], parts[2] if len(parts) > 2 else "") if len(parts) >= 2 and parts[1] else None
+
+
+async def safe_send(bot, user_id: int, text: str, media: str | None = None, **kw) -> bool:
+    """Envia mensagem (com a foto/vídeo da copy, se tiver) sem derrubar nada se a pessoa bloqueou o bot."""
     try:
-        await bot.send_message(user_id, text, **kw)
+        m = get_media(media)
+        if not m:
+            await bot.send_message(user_id, text, **kw)
+        else:
+            kind, fid, _ = m
+            send = bot.send_video if kind == "video" else bot.send_photo
+            if len(text) <= 1024:
+                await send(user_id, fid, caption=text, **kw)
+            else:  # legenda do Telegram tem limite: manda a mídia e o texto em seguida
+                await send(user_id, fid)
+                await bot.send_message(user_id, text, **kw)
         return True
     except Forbidden:
         db.execute("UPDATE leads SET blocked=1 WHERE user_id=?", (user_id,))
         db.commit()
     except RetryAfter as e:
         await asyncio.sleep(e.retry_after + 1)
-        return await safe_send(bot, user_id, text, **kw)
+        return await safe_send(bot, user_id, text, media, **kw)
     except TelegramError as e:
         log.warning("Falha ao enviar para %s: %s", user_id, e)
     return False
@@ -110,7 +139,7 @@ async def grant(bot, user_id: int, plan) -> int | None:
     paid_text = esc(get_setting("paid_text"))
 
     if already_in:
-        await safe_send(bot, user_id, f"{paid_text}\n\n{validity}", parse_mode=ParseMode.HTML)
+        await safe_send(bot, user_id, f"{paid_text}\n\n{validity}", "paid", parse_mode=ParseMode.HTML)
         return new_exp
 
     try:
@@ -123,7 +152,7 @@ async def grant(bot, user_id: int, plan) -> int | None:
         )
     except TelegramError as e:
         log.error("Não consegui criar convite para o grupo %s: %s", group_id, e)
-        await safe_send(bot, user_id, f"{paid_text}\n\n{validity}\n\nO admin vai te enviar o link em instantes.",
+        await safe_send(bot, user_id, f"{paid_text}\n\n{validity}\n\nO admin vai te enviar o link em instantes.", "paid",
                         parse_mode=ParseMode.HTML)
         if admin_id():
             await safe_send(bot, admin_id(), f"⚠️ Não consegui gerar convite para {user_id} no grupo {group_id}: {e}")
@@ -132,7 +161,7 @@ async def grant(bot, user_id: int, plan) -> int | None:
     await safe_send(
         bot, user_id,
         f"{paid_text}\n\n{validity}\nEntre pelo botão abaixo (link pessoal, válido por 24 h):",
-        parse_mode=ParseMode.HTML,
+        media="paid", parse_mode=ParseMode.HTML,
         reply_markup=Kb([[Btn("🔓 Entrar no VIP", url=link.invite_link)]]),
     )
     return new_exp
@@ -208,7 +237,7 @@ async def offer_upsell(bot, user_id: int, bought_plan_id: int) -> None:
         bot, user_id,
         f"{esc(get_setting('upsell_text'))}\n\n<b>{esc(up['name'])}</b> ({plan_duration(up['days'])})\n"
         f"<s>{money('brl', full)}</s> por <b>{money('brl', price)}</b>",
-        parse_mode=ParseMode.HTML,
+        media="upsell", parse_mode=ParseMode.HTML,
         reply_markup=Kb([[Btn(f"🔥 Quero por {money('brl', price)}", callback_data=f"b:{up['id']}:brl:u")]]),
     )
 
@@ -291,7 +320,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not kb:
         await update.message.reply_text("As vendas estão fechadas no momento. Volte em breve!")
         return
-    await update.message.reply_text(get_setting("welcome_text"), reply_markup=kb)
+    await safe_send(context.bot, u.id, get_setting("welcome_text"), "welcome", reply_markup=kb)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -498,7 +527,7 @@ async def job_remarketing(context: ContextTypes.DEFAULT_TYPE) -> None:
         ).fetchall():
             db.execute("UPDATE payments SET followup=1 WHERE id=?", (p["id"],))
             db.commit()
-            await safe_send(bot, p["user_id"], get_setting("remarketing_text"),
+            await safe_send(bot, p["user_id"], get_setting("remarketing_text"), "remarketing",
                             reply_markup=Kb([[Btn("✅ Já paguei", callback_data=f"c:{p['id']}")]]))
 
     # 2) Downsell: oferece desconto para quem não pagou
@@ -522,7 +551,7 @@ async def job_remarketing(context: ContextTypes.DEFAULT_TYPE) -> None:
                 bot, p["user_id"],
                 f"{esc(get_setting('downsell_text'))}\n\n<b>{esc(plan['name'])}</b>\n"
                 f"<s>{money('brl', plan['price_brl'])}</s> por <b>{money('brl', price)}</b>",
-                parse_mode=ParseMode.HTML,
+                media="downsell", parse_mode=ParseMode.HTML,
                 reply_markup=Kb([[Btn(f"🎁 Pegar por {money('brl', price)}", callback_data=f"b:{plan['id']}:brl:d")]]),
             )
 
@@ -544,7 +573,7 @@ async def job_expirations(context: ContextTypes.DEFAULT_TYPE) -> None:
         "SELECT * FROM members WHERE removed=0 AND expires_at IS NOT NULL AND expires_at<=?", (t,)
     ).fetchall():
         await remove_member(bot, m["user_id"], m["group_id"])
-        await safe_send(bot, m["user_id"], get_setting("expired_text"))
+        await safe_send(bot, m["user_id"], get_setting("expired_text"), "expired")
 
 
 # ───────────────────────── Disparo em massa ─────────────────────────
