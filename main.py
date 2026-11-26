@@ -19,6 +19,7 @@ from telegram.error import InvalidToken, NetworkError  # noqa: E402
 import core  # noqa: E402
 import db  # noqa: E402
 import panel  # noqa: E402
+import remote_config  # noqa: E402
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
 for noisy in ("httpx", "telegram.ext", "uvicorn.access", "apscheduler"):
@@ -44,6 +45,7 @@ async def main() -> None:
         raise SystemExit(3)
 
     db.seed_from_env()
+    remote_config.apply()  # config_remota.json do GitHub
     if not db.admin_id():
         log.info("Mande /admin SUA_SENHA para o bot no Telegram para virar o dono.")
     tg = core.build_application()

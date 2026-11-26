@@ -52,6 +52,7 @@ case "${1:-}" in
     echo "http://localhost:$PORT"
     grep -o 'Painel no Wi-Fi: .*' bot.log 2>/dev/null | tail -1
     command -v termux-open-url >/dev/null && termux-open-url "http://localhost:$PORT" ;;
+  exportar|export) "$PY" -c "import remote_config, json; print(json.dumps(remote_config.export(), ensure_ascii=False, indent=2))" ;;
   configurar|config) "$PY" configurar.py && { parar >/dev/null; iniciar; } ;;
   atualizar|update)
     git pull --ff-only && "$PY" -m pip install -q -r requirements.txt && { parar >/dev/null; iniciar; } ;;
@@ -64,6 +65,7 @@ case "${1:-}" in
   levebot log          acompanha o log ao vivo (Ctrl+C sai)
   levebot painel       abre o painel no navegador
   levebot configurar   muda token, chaves, senha
+  levebot exportar     mostra planos, preços e textos atuais (para mandar ao Claude)
   levebot atualizar    baixa a versão nova do GitHub (também acontece sozinho a cada 10 min)"
     ;;
 esac
