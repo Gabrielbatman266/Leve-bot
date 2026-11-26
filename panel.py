@@ -12,10 +12,11 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 import api
+import autopost
 import core
 import gateways as gw
 from core import esc, money
@@ -52,7 +53,7 @@ button.sec{background:#2a3040}button.red{background:#c92a2a}button.sm{padding:5p
 """
 
 NAV = [("/", "Início"), ("/vendas", "Vendas"), ("/membros", "Membros"), ("/planos", "Planos"),
-       ("/links", "Links"), ("/disparo", "Disparo"), ("/postleve", "Post Leve"), ("/config", "Config"), ("/sair", "Sair")]
+       ("/links", "Links"), ("/disparo", "Disparo"), ("/postagem", "Postagem"), ("/postleve", "Post Leve"), ("/config", "Config"), ("/sair", "Sair")]
 
 
 # ───────────────────────── Helpers ─────────────────────────
@@ -649,6 +650,146 @@ async def config(request: Request):
     return page(request, "Config", "".join(html_parts))
 
 
+# ───────────────────────── Postagem automática ─────────────────────────
+_thumbs: dict[int, bytes] = {}
+
+
+@protected
+async def postagem(request: Request):
+    if request.method == "POST":
+        f = await form_data(request)
+        set_setting("ap_on", "1" if f.get("ap_on") == "1" else "0")
+        set_setting("ap_recycle", "1" if f.get("ap_recycle") == "1" else "0")
+        mins = re.sub(r"\D", "", f.get("ap_minutes", ""))
+        set_setting("ap_minutes", mins or "60")
+        set_setting("ap_group", re.sub(r"[^\d-]", "", f.get("ap_group", "")))
+        return back(request, "/postagem", "Postagem salva.")
+
+    c = autopost.counts()
+    on = autopost.setting("ap_on") == "1"
+    rec = autopost.setting("ap_recycle") == "1"
+    grp = autopost.target_group()
+    last = int(autopost.setting("ap_last") or 0)
+    mins = autopost.setting("ap_minutes")
+    nxt = "—" if not on else ("agora" if now() - last >= int(mins or 60) * 60 else dt(last + int(mins or 60) * 60))
+
+    def card(label, value):
+        return f'<div class="card"><small>{label}</small><div class="v">{value}</div></div>'
+
+    chk_on = " checked" if on else ""
+    chk_rec = " checked" if rec else ""
+    status_txt = "ligado ▶️" if on else "pausado ⏸"
+    ag = autopost.setting("ap_group")
+    grp_opts = group_options(int(ag) if ag.lstrip("-").isdigit() else None)
+    grp_txt = grp or "nenhum"
+    cards = card("Na fila", c["fila"]) + card("Já postados", c["postados"]) + card("Status", status_txt) + card("Próximo post", nxt)
+
+    rows = db.execute("SELECT * FROM posts ORDER BY (posted_at IS NOT NULL), id DESC LIMIT 120").fetchall()
+    items = ""
+    for r in rows:
+        mini = (f'<img src="/postagem/mini/{r["id"]}" loading="lazy" style="width:56px;height:56px;object-fit:cover;border-radius:8px">'
+                if r["thumb_id"] else "🎬" if r["kind"] == "video" else "🖼")
+        st = ('<span class="pill pend">na fila</span>' if r["posted_at"] is None
+              else f'<span class="pill ok">saiu {r["times"]}x</span>')
+        items += (f"<tr><td>{mini}</td><td>{'vídeo' if r['kind'] == 'video' else 'foto'}</td><td>{st}</td>"
+                  f"<td style='white-space:normal;min-width:140px'>{esc(r['caption'][:80]) or '<span class=muted>sem legenda</span>'}</td>"
+                  f"<td><form method='post' action='/postagem/apagar' class='inline'>{csrf(request)}"
+                  f"<input type='hidden' name='id' value='{r['id']}'><button class='sm red'>Apagar</button></form></td></tr>")
+    table = (f'<div class="tw"><table><tr><th></th><th>Tipo</th><th>Status</th><th>Legenda</th><th></th></tr>{items}</table></div>'
+             if items else '<p class="muted">Nada ainda. Envie abaixo ou mande fotos/vídeos no privado do bot.</p>')
+
+    body = f"""<h2>Postagem automática</h2>
+<div class="grid">{cards}</div>
+
+<h2>Enviar fotos e vídeos</h2>
+<form class="box" method="post" action="/postagem/enviar" enctype="multipart/form-data">{csrf(request)}
+<label>Arquivos (pode escolher vários; vídeo até 50 MB)<input type="file" name="arquivos" multiple accept="image/*,video/*" required></label>
+<label>Legenda (opcional, vale para todos)<textarea name="legenda" style="min-height:60px"></textarea></label>
+<button>Colocar na fila</button></form>
+
+<h2>Ajustes</h2>
+<form class="box" method="post">{csrf(request)}
+<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ap_on" value="1"{chk_on} style="width:auto">Postar sozinho</label>
+<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ap_recycle" value="1"{chk_rec} style="width:auto">Quando a fila acabar, repostar o que já saiu (nunca o mesmo duas vezes seguidas)</label>
+<div class="row"><label>Intervalo (minutos)<input name="ap_minutes" inputmode="numeric" value="{esc(mins)}"></label>
+<label>Grupo/canal de destino<select name="ap_group"><option value="">Grupo do primeiro plano</option>{grp_opts}</select></label></div>
+<button>Salvar</button></form>
+<form method="post" action="/postagem/agora" style="margin-top:10px">{csrf(request)}<button class="sec" style="width:100%">📤 Postar o próximo agora</button></form>
+<p class="muted">Destino atual: <code>{grp_txt}</code></p>
+
+<h2>Fila e histórico</h2>{table}"""
+    return page(request, "Postagem", body)
+
+
+@protected
+async def postagem_enviar(request: Request):
+    f = await form_data(request)
+    owner = admin_id()
+    if not owner:
+        return back(request, "/postagem", "Defina o dono primeiro: mande /admin SUA_SENHA para o bot.")
+    bot = request.app.state.tg.bot
+    caption = (f.get("legenda") or "").strip()
+    ok = fail = 0
+    for up in f.getlist("arquivos"):
+        if not getattr(up, "filename", ""):
+            continue
+        data = await up.read()
+        is_video = (up.content_type or "").startswith("video")
+        try:
+            # o Telegram só guarda o arquivo se ele for enviado; mandamos para o dono e apagamos em seguida
+            if is_video:
+                m = await bot.send_video(owner, data, filename=up.filename, disable_notification=True)
+                autopost.add("video", m.video.file_id, caption, m.video.thumbnail.file_id if m.video.thumbnail else None)
+            else:
+                m = await bot.send_photo(owner, data, disable_notification=True)
+                autopost.add("photo", m.photo[-1].file_id, caption, m.photo[0].file_id)
+            ok += 1
+            try:
+                await m.delete()
+            except Exception:
+                pass
+        except Exception as e:  # arquivo grande demais, formato inválido…
+            log.warning("upload falhou (%s): %s", up.filename, e)
+            fail += 1
+    msg = f"{ok} arquivo(s) na fila." + (f" {fail} falharam (vídeo acima de 50 MB?)." if fail else "")
+    return back(request, "/postagem", msg)
+
+
+@protected
+async def postagem_apagar(request: Request):
+    f = await form_data(request)
+    db.execute("DELETE FROM posts WHERE id=?", (int(f.get("id") or 0),))
+    db.commit()
+    return back(request, "/postagem", "Apagado.")
+
+
+@protected
+async def postagem_agora(request: Request):
+    await form_data(request)
+    try:
+        msg = await autopost.post_now(request.app.state.tg.bot)
+    except Exception as e:
+        msg = f"Erro ao postar: {e}"
+    return back(request, "/postagem", msg)
+
+
+@protected
+async def postagem_mini(request: Request):
+    pid = int(request.path_params["pid"])
+    if pid not in _thumbs:
+        row = db.execute("SELECT thumb_id FROM posts WHERE id=?", (pid,)).fetchone()
+        if not row or not row["thumb_id"]:
+            return Response(status_code=404)
+        try:
+            tf = await request.app.state.tg.bot.get_file(row["thumb_id"])
+            _thumbs[pid] = bytes(await tf.download_as_bytearray())
+        except Exception:
+            return Response(status_code=404)
+        if len(_thumbs) > 300:
+            _thumbs.pop(next(iter(_thumbs)))
+    return Response(_thumbs[pid], media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
 # ───────────────────────── Webhook SyncPay ─────────────────────────
 async def webhook_syncpay(request: Request):
     """Aviso instantâneo do SyncPay. Não confiamos no conteúdo: só usamos o id e consultamos a API."""
@@ -689,6 +830,11 @@ def create_app(tg_application) -> Starlette:
             Route("/config", config, methods=["GET", "POST"]),
             Route("/webhook/syncpay", webhook_syncpay, methods=["POST"]),
             Route("/postleve", postleve, methods=["GET", "POST"]),
+            Route("/postagem", postagem, methods=["GET", "POST"]),
+            Route("/postagem/enviar", postagem_enviar, methods=["POST"]),
+            Route("/postagem/apagar", postagem_apagar, methods=["POST"]),
+            Route("/postagem/agora", postagem_agora, methods=["POST"]),
+            Route("/postagem/mini/{pid:int}", postagem_mini),
             *api.ROUTES,
         ],
         middleware=[Middleware(SessionMiddleware, secret_key=panel_secret(), session_cookie="levevip",

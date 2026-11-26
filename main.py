@@ -26,6 +26,17 @@ for noisy in ("httpx", "telegram.ext", "uvicorn.access", "apscheduler"):
 log = logging.getLogger("levevip")
 
 
+def lan_ip() -> str:
+    """IP deste aparelho na rede local (para abrir o painel de outro celular)."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return "IP-DO-APARELHO"
+
+
 async def main() -> None:
     missing = [k for k in ("BOT_TOKEN", "SYNCPAY_CLIENT_ID", "SYNCPAY_CLIENT_SECRET", "PANEL_PASSWORD") if not os.environ.get(k)]
     if missing:
@@ -50,6 +61,8 @@ async def main() -> None:
         await tg.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         log.info("Bot @%s rodando. Painel em http://%s:%s", tg.bot.username,
                  "localhost" if host in ("127.0.0.1", "0.0.0.0") else host, port)
+        if host == "0.0.0.0":
+            log.info("Painel no Wi-Fi: http://%s:%s", lan_ip(), port)
         try:
             await server.serve()  # roda até Ctrl+C
         finally:

@@ -46,6 +46,7 @@ case "${1:-}" in
   log|logs) tail -n 50 -f bot.log ;;
   painel)
     echo "http://localhost:$PORT"
+    grep -o 'Painel no Wi-Fi: .*' bot.log 2>/dev/null | tail -1
     command -v termux-open-url >/dev/null && termux-open-url "http://localhost:$PORT" ;;
   configurar|config) "$PY" configurar.py && { parar >/dev/null; iniciar; } ;;
   atualizar|update)
@@ -59,6 +60,6 @@ case "${1:-}" in
   levebot log          acompanha o log ao vivo (Ctrl+C sai)
   levebot painel       abre o painel no navegador
   levebot configurar   muda token, chaves, senha
-  levebot atualizar    baixa a versão nova do GitHub"
+  levebot atualizar    baixa a versão nova do GitHub (também acontece sozinho a cada 10 min)"
     ;;
 esac

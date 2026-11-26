@@ -57,6 +57,17 @@ lembrete antes de vencer · remoção automática · `/status` para o cliente.
 dar dias, remover, liberar manual) · planos · grupos detectados · **links rastreados**
 (`t.me/seubot?start=threads_bio`) com vendas por origem · **disparo em massa** · todos os textos e descontos.
 
+**Postagem automática:** fila de fotos e vídeos que o bot posta sozinho no grupo/canal no intervalo
+que você escolher. Alimente pela aba **Postagem** do painel (envio direto do celular) ou mandando
+foto/vídeo no privado do bot. Quando a fila acaba, ele reposta o que já saiu (nunca o mesmo duas vezes
+seguidas). No privado do bot: `/fila` `/postar` `/intervalo 45` `/pausar` `/retomar` `/reciclar`.
+
+**Atualiza sozinho:** a cada 10 minutos o bot confere o GitHub; se tiver versão nova, baixa e reinicia.
+Para desligar, ponha `AUTO_UPDATE=0` no `.env`.
+
+**Painel em outro celular:** no `levebot configurar`, responda **s** em "Abrir o painel em outros
+aparelhos do mesmo Wi-Fi". O endereço aparece em `levebot painel`.
+
 ## Conectar com o Post Leve
 
 No painel, aba **Post Leve**, toque em **Conectar Post Leve** (no mesmo celular). Os dois passam a conversar:
