@@ -122,6 +122,9 @@ def main() -> None:
             break
         print(f"{R}✘ Use pelo menos 6 caracteres, sem espaço.{N}")
     print(f"{G}✔ Senha: {pw}{N}  (anote!)\n")
+    lan_default = "s" if env.get("PANEL_HOST", "127.0.0.1") == "0.0.0.0" else "n"
+    lan = ask("Abrir o painel em outros aparelhos do mesmo Wi-Fi? (s/n)", lan_default).lower().startswith("s")
+    panel_host = "0.0.0.0" if lan else "127.0.0.1"
 
     # 4. Primeiro plano
     print(f"{Y}4/4 · Primeiro plano{N} — é criado sozinho quando você adicionar o bot ao grupo. Dá para mudar no painel.")
@@ -140,6 +143,7 @@ def main() -> None:
     # Opcional: Stripe
     stripe_key = env.get("STRIPE_SECRET_KEY", "")
     print(f"\n{Y}Opcional · Stripe{N} — só se quiser vender em dólar/euro no cartão. Enter para pular.")
+    print(f"{R}  Atenção: a Stripe proíbe conteúdo adulto (inclusive feito com IA). Para grupo hot, pule.{N}")
     k = ask("Chave secreta do Stripe (sk_live_…)", stripe_key, True)
     if k and k != stripe_key:
         print(f"{G}✔ Stripe ok{N}" if check_stripe(k) else f"{Y}! Não consegui validar a chave do Stripe.{N}")
@@ -152,7 +156,8 @@ def main() -> None:
         f"SYNCPAY_CLIENT_SECRET={csec}",
         f"PANEL_PASSWORD={pw}",
         f"PANEL_PORT={env.get('PANEL_PORT', '8080')}",
-        f"PANEL_HOST={env.get('PANEL_HOST', '127.0.0.1')}",
+        f"PANEL_HOST={panel_host}",
+        f"AUTO_UPDATE={env.get('AUTO_UPDATE', '1')}",
         f"STRIPE_SECRET_KEY={stripe_key}",
         f"PUBLIC_URL={env.get('PUBLIC_URL', '')}",
         f"SYNCPAY_WEBHOOK_TOKEN={env.get('SYNCPAY_WEBHOOK_TOKEN', '')}",

@@ -593,4 +593,6 @@ def build_application() -> Application:
     app.job_queue.run_repeating(job_poll, interval=CHECK_EVERY, first=5)
     app.job_queue.run_repeating(job_remarketing, interval=60, first=20)
     app.job_queue.run_repeating(job_expirations, interval=600, first=30)
+    import autopost  # fila de fotos/vídeos postados sozinhos no grupo
+    autopost.register(app)
     return app
