@@ -14,7 +14,7 @@ load_dotenv()  # antes de importar o resto (eles leem o .env)
 
 import uvicorn  # noqa: E402
 from telegram import Update  # noqa: E402
-from telegram.error import InvalidToken  # noqa: E402
+from telegram.error import InvalidToken, NetworkError  # noqa: E402
 
 import core  # noqa: E402
 import db  # noqa: E402
@@ -51,11 +51,18 @@ async def main() -> None:
     port = int(os.environ.get("PANEL_PORT", "8080"))
     server = uvicorn.Server(uvicorn.Config(panel.create_app(tg), host=host, port=port, log_level="warning"))
 
-    try:
-        await tg.initialize()
-    except InvalidToken:
-        print("Token do bot recusado pelo Telegram — rode: levebot configurar")
-        raise SystemExit(3)
+    wait = 5
+    while True:  # sem internet ou Telegram lento: tenta de novo em vez de cair
+        try:
+            await tg.initialize()
+            break
+        except InvalidToken:
+            print("Token do bot recusado pelo Telegram — rode: levebot configurar")
+            raise SystemExit(3)
+        except NetworkError as e:
+            log.warning("Sem conexão com o Telegram (%s). Tentando de novo em %s s…", e, wait)
+            await asyncio.sleep(wait)
+            wait = min(wait * 2, 60)
     async with tg:
         await tg.start()
         await tg.updater.start_polling(allowed_updates=Update.ALL_TYPES)
