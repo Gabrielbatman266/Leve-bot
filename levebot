@@ -15,15 +15,19 @@ iniciar() {
   local start; start=$( { wc -c < bot.log; } 2>/dev/null || echo 0)
   nohup "$DIR/rodar.sh" >/dev/null 2>&1 &
   echo -n "Ligando"
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 90); do
     sleep 1; echo -n "."
     new="$(tail -c +$((start + 1)) bot.log 2>/dev/null)"
     if echo "$new" | grep -q "rodando. Painel"; then
       echo -e "\n${G}● Bot ligado:${N} $(echo "$new" | grep -o '@[A-Za-z0-9_]*' | head -1)  —  painel: http://localhost:$PORT"
       return 0
     fi
-    if ! running || echo "$new" | grep -q "Traceback\|levebot configurar"; then break; fi
+    if ! running || echo "$new" | grep -q "levebot configurar"; then break; fi
   done
+  if running; then
+    echo -e "\n${G}● Ainda conectando em segundo plano${N} (internet lenta). Confira em 1 minuto com: ${B}levebot status${N}"
+    return 0
+  fi
   echo -e "\n${R}✘ O bot não ligou. Últimas linhas do log:${N}"; tail -n 12 bot.log
   echo -e "Se for chave errada: ${B}levebot configurar${N}"
   return 1

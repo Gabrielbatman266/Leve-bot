@@ -610,7 +610,11 @@ async def broadcast(bot, segment: str, text: str, with_plans: bool) -> None:
 
 # ───────────────────────── Montagem ─────────────────────────
 def build_application() -> Application:
-    app = Application.builder().token(os.environ["BOT_TOKEN"]).build()
+    # Tempos maiores: celular fraco / internet instável não derruba o bot
+    app = (Application.builder().token(os.environ["BOT_TOKEN"])
+           .connect_timeout(30).read_timeout(30).write_timeout(120).pool_timeout(30)
+           .get_updates_connect_timeout(30).get_updates_read_timeout(40)
+           .build())
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("painel", cmd_painel))
